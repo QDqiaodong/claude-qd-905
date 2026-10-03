@@ -40,4 +40,10 @@ public interface InspectionRecordRepository extends JpaRepository<InspectionReco
     long countByVerdict(String verdict);
 
     boolean existsByInspectNo(String inspectNo);
+
+    /** 返修批次详情：归并进该批次的全部检验记录（可追溯来源） */
+    List<InspectionRecord> findByReworkIdOrderByIdAsc(Long reworkId);
+
+    /** 历史归并：全部判返修的检验记录 */
+    List<InspectionRecord> findByVerdictOrderByIdAsc(String verdict);
 }

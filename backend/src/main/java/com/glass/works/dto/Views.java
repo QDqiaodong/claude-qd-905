@@ -1,5 +1,8 @@
 package com.glass.works.dto;
 
+import com.glass.works.domain.InspectionRecord;
+import com.glass.works.domain.ReworkBatch;
+import com.glass.works.domain.ReworkEvent;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +47,15 @@ public final class Views {
         private long scrapCount;
         private List<DefectPointVO> defects = new ArrayList<>();
         private List<DefectTypeStatDTO> typeStats = new ArrayList<>();
+    }
+
+    /** 返修批次详情：批次 + 时间线 + 归并的检验记录 */
+    @Data
+    @NoArgsConstructor
+    public static class ReworkDetailVO {
+        private ReworkBatch batch;
+        private List<ReworkEvent> events = new ArrayList<>();
+        private List<InspectionRecord> records = new ArrayList<>();
     }
 
     /** 炉体分段标注 */

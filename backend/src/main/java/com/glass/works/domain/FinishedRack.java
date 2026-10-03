@@ -41,6 +41,10 @@ public class FinishedRack {
     @Column(name = "order_no", nullable = false, length = 32)
     private String orderNo;
 
+    /** 架上成品对应的生产批次号（可空；用于读取共享的批次质量状态） */
+    @Column(name = "batch_no", length = 32)
+    private String batchNo;
+
     @Column(name = "glass_type", length = 32)
     private String glassType;
 
@@ -68,6 +72,16 @@ public class FinishedRack {
 
     @Column(name = "shipped_at")
     private LocalDateTime shippedAt;
+
+    // ---------------- 共享质量状态（由 InspectionService 按返修闭环计算后填入，不落库） ----------------
+
+    /** 关联返修批次中最严格的状态：ISOLATED / PROCESSING / PENDING_RECHECK / RELEASED / null 无返修 */
+    @Transient
+    private String qualityStatus;
+
+    /** 未闭环返修时给出的人话拦截原因（哪个返修单、哪个工序、当前状态） */
+    @Transient
+    private String blockReason;
 
     /** 派生列（面积 ㎡），走属性访问 */
     private BigDecimal areaSqm;
@@ -105,6 +119,19 @@ public class FinishedRack {
     public String getSpecText() {
         return (thicknessMm == null ? "0" : thicknessMm) + "mm "
                 + (lengthMm == null ? "0" : lengthMm) + "×" + (widthMm == null ? "0" : widthMm);
+    }
+
+    /** 质量状态中文名（共享返修闭环状态） */
+    @Transient
+    public String getQualityStatusName() {
+        return qualityStatus == null ? "" : com.glass.works.common.Dict.reworkStatusName(qualityStatus);
+    }
+
+    /** 是否被未闭环返修拦截（隔离 / 处理中 / 待复检都不可上架、发运） */
+    @Transient
+    public boolean isShipBlocked() {
+        return qualityStatus != null
+                && !com.glass.works.common.Dict.RW_RELEASED.equals(qualityStatus);
     }
 
     /** 剩余承重 kg */

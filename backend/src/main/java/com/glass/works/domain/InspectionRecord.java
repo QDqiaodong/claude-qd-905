@@ -69,6 +69,10 @@ public class InspectionRecord {
     @Column(name = "inspected_at")
     private LocalDateTime inspectedAt;
 
+    /** 判返修后关联的返修批次（可追溯闭环；非返修判定为空） */
+    @Column(name = "rework_id")
+    private Long reworkId;
+
     @Transient
     public String getVerdictName() {
         return switch (verdict == null ? "" : verdict) {

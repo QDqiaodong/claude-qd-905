@@ -14,6 +14,7 @@ import com.glass.works.repository.EdgeGrindingRepository;
 import com.glass.works.repository.FinishedRackRepository;
 import com.glass.works.repository.GlassStockRepository;
 import com.glass.works.repository.InspectionRecordRepository;
+import com.glass.works.repository.ReworkBatchRepository;
 import com.glass.works.repository.TemperingBatchRepository;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +33,7 @@ public class StatsService {
     private final DeepProcessRepository deepProcessRepository;
     private final InspectionRecordRepository inspectionRepository;
     private final FinishedRackRepository rackRepository;
+    private final ReworkBatchRepository reworkBatchRepository;
     private final StringRedisTemplate redisTemplate;
 
     public StatsService(GlassStockRepository stockRepository,
@@ -41,6 +43,7 @@ public class StatsService {
                         DeepProcessRepository deepProcessRepository,
                         InspectionRecordRepository inspectionRepository,
                         FinishedRackRepository rackRepository,
+                        ReworkBatchRepository reworkBatchRepository,
                         StringRedisTemplate redisTemplate) {
         this.stockRepository = stockRepository;
         this.cuttingOrderRepository = cuttingOrderRepository;
@@ -49,6 +52,7 @@ public class StatsService {
         this.deepProcessRepository = deepProcessRepository;
         this.inspectionRepository = inspectionRepository;
         this.rackRepository = rackRepository;
+        this.reworkBatchRepository = reworkBatchRepository;
         this.redisTemplate = redisTemplate;
     }
 
@@ -100,6 +104,12 @@ public class StatsService {
         data.put("passCount", inspectionRepository.countByVerdict("PASS"));
         data.put("reworkCount", inspectionRepository.countByVerdict("REWORK"));
         data.put("scrapCount", inspectionRepository.countByVerdict("SCRAP"));
+        // 返修闭环共享状态：未闭环（隔离 + 处理中 + 待复检）批次数
+        long reworkOpen = reworkBatchRepository.countByStatus("ISOLATED")
+                + reworkBatchRepository.countByStatus("PROCESSING")
+                + reworkBatchRepository.countByStatus("PENDING_RECHECK");
+        data.put("reworkOpenCount", reworkOpen);
+        data.put("reworkReleasedCount", reworkBatchRepository.countByStatus("RELEASED"));
         data.put("glassTypeStats", byGlassType());
         data.put("remnantRank", remnantRank());
         data.put("verdictByProcess", verdictByProcess());

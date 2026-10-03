@@ -23,6 +23,14 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 并发结论冲突：409 + 中文冲突说明（先提交的结论已生效，后到的必须看到明确冲突）
+     */
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConflict(ConflictException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.fail(e.getMessage()));
+    }
+
+    /**
      * 参数注解校验失败：400 + 字段名与提示
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)

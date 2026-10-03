@@ -17,6 +17,8 @@ public final class Requests {
     public static class RackRequest {
         private String rackNo;
         private String orderNo;
+        /** 架上成品对应的生产批次号（可空；用于共享质量状态与发运拦截） */
+        private String batchNo;
         private String glassType;
         private Integer thicknessMm;
         private Integer lengthMm;
@@ -55,6 +57,26 @@ public final class Requests {
     @NoArgsConstructor
     public static class MoveRequest {
         private Long locationId;
+    }
+
+    /** 返修处置入参（登记处置 / 提交复检共用） */
+    @Data
+    @NoArgsConstructor
+    public static class ReworkActionRequest {
+        /** 处置方式：复磨 / 重新钢化 / 重新镀膜 / 重新合片 / 其他 */
+        private String method;
+        private String note;
+        private String operator;
+    }
+
+    /** 复检判定入参 */
+    @Data
+    @NoArgsConstructor
+    public static class RecheckRequest {
+        /** PASS 合格放行 / REWORK 再判返修回隔离 */
+        private String verdict;
+        private String inspector;
+        private String note;
     }
 
     // ---------------- 立体库位视图 ----------------

@@ -8,6 +8,7 @@ import CuttingView from './views/CuttingView.vue'
 import TemperingView from './views/TemperingView.vue'
 import DeepProcessView from './views/DeepProcessView.vue'
 import InspectionView from './views/InspectionView.vue'
+import ReworkView from './views/ReworkView.vue'
 
 const modules = [
   {
@@ -55,6 +56,15 @@ const modules = [
       { label: '缺陷分布图', path: '/inspection', query: {} },
       { label: '成品架', path: '/inspection', query: { view: 'rack' } }
     ]
+  },
+  {
+    key: 'rework',
+    name: '返修闭环',
+    desc: '隔离 · 处置 · 复检 · 放行',
+    children: [
+      { label: '返修工作区', path: '/rework', query: {} },
+      { label: '待复检', path: '/rework', query: { status: 'PENDING_RECHECK' } }
+    ]
   }
 ]
 
@@ -69,7 +79,8 @@ const viewMap = {
   '/cutting': CuttingView,
   '/tempering': TemperingView,
   '/deep': DeepProcessView,
-  '/inspection': InspectionView
+  '/inspection': InspectionView,
+  '/rework': ReworkView
 }
 
 const currentView = computed(
@@ -119,7 +130,7 @@ onMounted(() => {
       <div class="brand-mark"><span>G</span></div>
       <div>
         <div class="brand-title">玻璃深加工厂 · 原片与工序流水管理</div>
-        <div class="brand-sub">原片 → 切割 → 磨边 → 钢化 → 镀膜/中空/夹胶 → 检验 → 成品架</div>
+        <div class="brand-sub">原片 → 切割 → 磨边 → 钢化 → 镀膜/中空/夹胶 → 检验 → 成品架；判返修 ↺ 隔离 → 处置 → 复检 → 放行</div>
       </div>
       <div class="top-stats" v-if="overview">
         <div class="top-stat"><b>{{ overview.stockCount }}</b><span>原片批次</span></div>
@@ -128,6 +139,7 @@ onMounted(() => {
         <div class="top-stat"><b>{{ overview.deepProcessCount }}</b><span>深加工批次</span></div>
         <div class="top-stat"><b>{{ overview.passCount }}</b><span>检验合格</span></div>
         <div class="top-stat"><b>{{ overview.rackCount }}</b><span>成品架</span></div>
+        <div class="top-stat"><b :style="{ color: overview.reworkOpenCount > 0 ? '#ffb74d' : '#4dd6a8' }">{{ overview.reworkOpenCount }}</b><span>返修未闭环</span></div>
       </div>
     </header>
 

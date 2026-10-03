@@ -7,6 +7,7 @@ import CuttingView from '../views/CuttingView.vue'
 import TemperingView from '../views/TemperingView.vue'
 import DeepProcessView from '../views/DeepProcessView.vue'
 import InspectionView from '../views/InspectionView.vue'
+import ReworkView from '../views/ReworkView.vue'
 
 const routes = [
   { path: '/', redirect: '/stock' },
@@ -15,6 +16,7 @@ const routes = [
   { path: '/tempering', name: 'tempering', component: TemperingView },
   { path: '/deep', name: 'deep', component: DeepProcessView },
   { path: '/inspection', name: 'inspection', component: InspectionView },
+  { path: '/rework', name: 'rework', component: ReworkView },
   { path: '/:pathMatch(.*)*', redirect: '/stock' }
 ]
 

@@ -232,6 +232,45 @@ public final class Dict {
             SHIP_READY, "待发货",
             SHIP_SHIPPED, "已发货");
 
+    // ---------------- 返修批次状态（受控流转） ----------------
+    /** 隔离：判返修后初始状态，等待登记处置 */
+    public static final String RW_ISOLATED = "ISOLATED";
+    /** 处理中：已登记处置，返修进行中 */
+    public static final String RW_PROCESSING = "PROCESSING";
+    /** 待复检：处置完成，等待复检判定 */
+    public static final String RW_PENDING_RECHECK = "PENDING_RECHECK";
+    /** 已放行：复检合格，闭环终态 */
+    public static final String RW_RELEASED = "RELEASED";
+
+    public static final List<String> REWORK_STATUSES =
+            List.of(RW_ISOLATED, RW_PROCESSING, RW_PENDING_RECHECK, RW_RELEASED);
+
+    private static final Map<String, String> REWORK_STATUS_NAME = Map.of(
+            RW_ISOLATED, "隔离",
+            RW_PROCESSING, "处理中",
+            RW_PENDING_RECHECK, "待复检",
+            RW_RELEASED, "已放行");
+
+    // ---------------- 返修时间线事件类型 ----------------
+    public static final String EV_CREATE = "CREATE";        // 新判返修，建批隔离
+    public static final String EV_MERGE = "MERGE";          // 历史记录归并建批
+    public static final String EV_APPEND = "APPEND";        // 新返修判定并入在制批次
+    public static final String EV_DISPOSE = "DISPOSE";      // 登记处置，进入处理中
+    public static final String EV_SUBMIT = "SUBMIT";        // 处置完成，提交复检
+    public static final String EV_RECHECK = "RECHECK";      // 复检判定（合格放行 / 再判返修回隔离）
+    public static final String EV_CONFLICT = "CONFLICT";    // 并发结论冲突，未生效
+    public static final String EV_SHIP_BLOCK = "SHIP_BLOCK"; // 上架 / 发运被质量状态拦截
+
+    private static final Map<String, String> REWORK_EVENT_NAME = Map.of(
+            EV_CREATE, "判返修隔离",
+            EV_MERGE, "历史归并建批",
+            EV_APPEND, "并入在制批次",
+            EV_DISPOSE, "登记处置",
+            EV_SUBMIT, "提交复检",
+            EV_RECHECK, "复检判定",
+            EV_CONFLICT, "并发冲突",
+            EV_SHIP_BLOCK, "发运拦截");
+
     // ---------------- 取值方法 ----------------
 
     public static boolean isValidGlassType(String type) {
@@ -337,6 +376,18 @@ public final class Dict {
 
     public static String shipStatusName(String status) {
         return status == null ? "" : SHIP_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static boolean isValidReworkStatus(String status) {
+        return status != null && REWORK_STATUS_NAME.containsKey(status);
+    }
+
+    public static String reworkStatusName(String status) {
+        return status == null ? "" : REWORK_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static String reworkEventName(String eventType) {
+        return eventType == null ? "" : REWORK_EVENT_NAME.getOrDefault(eventType, eventType);
     }
 
     public static String stageName(String stage) {

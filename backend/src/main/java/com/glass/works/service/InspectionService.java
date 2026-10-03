@@ -27,11 +27,14 @@ public class InspectionService {
 
     private final InspectionRecordRepository inspectionRepository;
     private final FinishedRackRepository rackRepository;
+    private final ReworkService reworkService;
 
     public InspectionService(InspectionRecordRepository inspectionRepository,
-                             FinishedRackRepository rackRepository) {
+                             FinishedRackRepository rackRepository,
+                             ReworkService reworkService) {
         this.inspectionRepository = inspectionRepository;
         this.rackRepository = rackRepository;
+        this.reworkService = reworkService;
     }
 
     // ---------------- 检验 ----------------
@@ -77,7 +80,12 @@ public class InspectionService {
         record.setInspector(request.getInspector());
         record.setSheetCount(request.getSheetCount() == null ? 1 : request.getSheetCount());
         record.setInspectedAt(LocalDateTime.now());
-        return inspectionRepository.save(record);
+        InspectionRecord saved = inspectionRepository.save(record);
+        // 判返修即形成 / 并入可追溯的返修隔离批次（同事务，检验与闭环状态同生共死）
+        if (Dict.VERDICT_REWORK.equals(saved.getVerdict())) {
+            reworkService.onReworkVerdict(saved);
+        }
+        return saved;
     }
 
     /** 缺陷分布图：玻璃板平面 + 缺陷打点 + 类型占比 */
@@ -125,7 +133,10 @@ public class InspectionService {
     // ---------------- 成品架 ----------------
 
     public List<FinishedRack> racks() {
-        return rackRepository.findAll();
+        List<FinishedRack> racks = rackRepository.findAll();
+        // 回填共享的批次质量状态与拦截原因（隔离 / 处理中 / 待复检 / 已放行）
+        reworkService.applyQuality(racks);
+        return racks;
     }
 
     public List<RackStatDTO> rackStat() {
@@ -153,6 +164,7 @@ public class InspectionService {
         FinishedRack rack = new FinishedRack();
         rack.setRackNo(request.getRackNo());
         rack.setOrderNo(request.getOrderNo());
+        rack.setBatchNo(request.getBatchNo());
         rack.setGlassType(request.getGlassType());
         rack.setThicknessMm(request.getThicknessMm());
         rack.setLengthMm(request.getLengthMm());
@@ -171,6 +183,7 @@ public class InspectionService {
 
     /**
      * 成品上架：承重超过上限不允许再上架，并给出剩余承重。
+     * 上架前读取共享质量状态：未闭环返修批次不允许上成品架。
      */
     @Transactional
     public FinishedRack loadRack(Long id, RackLoadRequest request) {
@@ -179,6 +192,7 @@ public class InspectionService {
         if (Dict.SHIP_SHIPPED.equals(rack.getShipStatus())) {
             throw new BizException("成品架 " + rack.getRackNo() + " 已发货，不能再上架");
         }
+        reworkService.assertShippable(rack, "上架");
         BigDecimal weight = request == null || request.getWeightKg() == null
                 ? rack.getEstimatedWeightKg() : request.getWeightKg();
         if (weight.doubleValue() <= 0) {
@@ -198,6 +212,10 @@ public class InspectionService {
         return rackRepository.save(rack);
     }
 
+    /**
+     * 发货：读取共享质量状态，隔离 / 处理中 / 待复检批次一律拦截，
+     * 只有已放行（或无返修）批次可发运；已发货数据只读，不被倒改。
+     */
     @Transactional
     public FinishedRack ship(Long id) {
         FinishedRack rack = rackRepository.findById(id)
@@ -208,6 +226,7 @@ public class InspectionService {
         if (nvl(rack.getCurrentLoadKg()).doubleValue() <= 0) {
             throw new BizException("成品架 " + rack.getRackNo() + " 尚未上架成品，不能发货");
         }
+        reworkService.assertShippable(rack, "发运");
         rack.setShipStatus(Dict.SHIP_SHIPPED);
         rack.setShippedAt(LocalDateTime.now());
         return rackRepository.save(rack);

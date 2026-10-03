@@ -115,6 +115,9 @@ onMounted(load)
 const verdictColor = { PASS: '#4dd6a8', REWORK: '#ffb74d', SCRAP: '#e4573d' }
 const shipColor = { PENDING: '#8c98cc', READY: '#4fc3f7', SHIPPED: '#4dd6a8' }
 const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发货' }
+// 共享质量状态（返修闭环）：隔离 / 处理中 / 待复检 拦截，已放行可继续
+const qualityColor = { ISOLATED: '#ff6b6b', PROCESSING: '#ffb74d', PENDING_RECHECK: '#4fc3f7', RELEASED: '#4dd6a8' }
+const qualityLabel = { ISOLATED: '返修隔离', PROCESSING: '返修处理中', PENDING_RECHECK: '待复检', RELEASED: '复检已放行' }
 </script>
 
 <template>
@@ -221,7 +224,7 @@ const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发�
     <!-- 成品架 -->
     <div class="glass glass-pad" style="margin-top: 14px">
       <div class="section-title">
-        成品架 · 面积由长×宽×片数派生
+        成品架 · 上架 / 发运读取返修闭环状态，未闭环批次自动拦截
         <span class="rack-stat-inline">
           <span v-for="s in rackStat" :key="s.shipStatus">
             {{ s.shipStatusName }} {{ s.rackCount }} 架 / {{ s.areaSqm }} ㎡
@@ -229,17 +232,20 @@ const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发�
         </span>
       </div>
       <el-table :data="racks" size="small" stripe max-height="300">
-        <el-table-column prop="rackNo" label="架号" width="80" />
-        <el-table-column prop="orderNo" label="订单号" width="130" />
-        <el-table-column prop="glassType" label="玻璃种类" width="100" />
-        <el-table-column label="规格" width="150">
+        <el-table-column prop="rackNo" label="架号" width="70" />
+        <el-table-column prop="orderNo" label="订单号" width="120" />
+        <el-table-column label="批次号" width="100">
+          <template #default="{ row }">{{ row.batchNo || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="glassType" label="玻璃种类" width="96" />
+        <el-table-column label="规格" width="140">
           <template #default="{ row }">{{ row.specText }}</template>
         </el-table-column>
-        <el-table-column prop="sheetCount" label="片数" width="70" />
-        <el-table-column label="面积㎡" width="90">
+        <el-table-column prop="sheetCount" label="片数" width="64" />
+        <el-table-column label="面积㎡" width="80">
           <template #default="{ row }"><b style="color:#4fc3f7">{{ row.areaSqm }}</b></template>
         </el-table-column>
-        <el-table-column label="承重" width="150">
+        <el-table-column label="承重" width="140">
           <template #default="{ row }">
             <div class="load-bar" :class="{ over: row.loadRate > 100 }">
               <i :style="{ width: Math.min(100, row.loadRate) + '%' }"></i>
@@ -247,15 +253,24 @@ const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发�
             <span class="load-text">{{ row.currentLoadKg }} / {{ row.maxLoadKg }} kg</span>
           </template>
         </el-table-column>
-        <el-table-column label="发货状态" width="100">
+        <el-table-column label="质量状态" width="200">
+          <template #default="{ row }">
+            <template v-if="row.qualityStatus">
+              <span :style="{ color: qualityColor[row.qualityStatus], fontWeight: 700 }">{{ qualityLabel[row.qualityStatus] }}</span>
+              <div v-if="row.shipBlocked" class="block-reason">{{ row.blockReason }}</div>
+            </template>
+            <span v-else style="color:#8c98cc">无返修</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="发货状态" width="90">
           <template #default="{ row }">
             <span :style="{ color: shipColor[row.shipStatus], fontWeight: 700 }">{{ shipLabel[row.shipStatus] }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
-            <el-button size="small" @click="loadRack(row)">上架</el-button>
-            <el-button size="small" type="primary" @click="ship(row)">发货</el-button>
+            <el-button size="small" :disabled="row.shipBlocked" @click="loadRack(row)">上架</el-button>
+            <el-button size="small" type="primary" :disabled="row.shipBlocked" @click="ship(row)">发货</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -285,6 +300,9 @@ const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发�
           <el-select v-model="form.verdict" style="width: 100%">
             <el-option v-for="v in VERDICTS" :key="v.key" :label="v.label" :value="v.key" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="form.verdict === 'REWORK'" label=" ">
+          <span style="font-size: 11px; color: #ffb74d">判返修将自动生成 / 并入返修隔离批次，进入「隔离 → 处置 → 复检 → 放行」闭环，未放行前成品架发运会被拦截</span>
         </el-form-item>
         <el-form-item label="批次/订单">
           <el-input v-model="form.batchNo" placeholder="原片批次" style="width: 48%" />
@@ -336,6 +354,7 @@ const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发�
 
 .empty { font-size: 12px; color: var(--ink-dim); padding: 14px 0; }
 .load-text { font-size: 10px; color: var(--ink-dim); }
+.block-reason { font-size: 10px; color: #ff9d8a; line-height: 1.5; margin-top: 2px; }
 .rack-stat-inline { margin-left: auto; display: flex; gap: 12px; font-size: 11px; color: var(--ink-dim); font-weight: 400; }
 .pos-row { display: flex; align-items: center; gap: 6px; }
 .grid-2-wide.reverse { display: flex; flex-direction: column; }

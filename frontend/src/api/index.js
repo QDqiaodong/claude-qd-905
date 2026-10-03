@@ -78,6 +78,15 @@ const inspection = {
   rackStat: () => call(http.get('/inspection/rack-stat'))
 }
 
+const rework = {
+  list: (status) => call(http.get('/rework/list', { params: { status } })),
+  summary: () => call(http.get('/rework/summary')),
+  detail: (id) => call(http.get(`/rework/${id}`)),
+  dispose: (id, data) => call(http.post(`/rework/${id}/dispose`, data || {})),
+  submitRecheck: (id, data) => call(http.post(`/rework/${id}/submit-recheck`, data || {})),
+  recheck: (id, data) => call(http.post(`/rework/${id}/recheck`, data))
+}
+
 const stats = {
   overview: () => call(http.get('/stats/overview')),
   glassType: () => call(http.get('/stats/glass-type')),
@@ -90,4 +99,4 @@ const stats = {
   rack: () => call(http.get('/stats/rack'))
 }
 
-export default { http, stock, cutting, process, deep, inspection, stats }
+export default { http, stock, cutting, process, deep, inspection, rework, stats }
