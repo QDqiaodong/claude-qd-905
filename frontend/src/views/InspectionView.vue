@@ -115,6 +115,12 @@ onMounted(load)
 const verdictColor = { PASS: '#4dd6a8', REWORK: '#ffb74d', SCRAP: '#e4573d' }
 const shipColor = { PENDING: '#8c98cc', READY: '#4fc3f7', SHIPPED: '#4dd6a8' }
 const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发货' }
+const reworkColor = { QUARANTINED: '#e4573d', PROCESSING: '#ffb74d', INSPECTING: '#4fc3f7', RELEASED: '#4dd6a8' }
+const reworkLabel = { QUARANTINED: '返修隔离中', PROCESSING: '返修处理中', INSPECTING: '待复检', RELEASED: '复检已放行' }
+
+function goRework(batchId) {
+  router.push({ path: '/rework', query: batchId ? { batchId } : {} })
+}
 </script>
 
 <template>
@@ -183,6 +189,10 @@ const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发�
             <div class="t-row"><span>坐标</span><b>{{ hover.posX }}% , {{ hover.posY }}%</b></div>
             <div class="t-row"><span>涉及片数</span><b>{{ hover.sheetCount }}</b></div>
             <div class="t-row"><span>检验员</span><b>{{ hover.inspector }}</b></div>
+            <div class="t-row" v-if="hover.reworkStatus">
+              <span>质量状态</span>
+              <b :style="{ color: reworkColor[hover.reworkStatus] }">⛔ {{ hover.reworkStatusName }}</b>
+            </div>
           </div>
         </div>
       </div>
@@ -252,10 +262,30 @@ const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发�
             <span :style="{ color: shipColor[row.shipStatus], fontWeight: 700 }">{{ shipLabel[row.shipStatus] }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150">
+        <el-table-column label="质量门" width="120">
           <template #default="{ row }">
-            <el-button size="small" @click="loadRack(row)">上架</el-button>
-            <el-button size="small" type="primary" @click="ship(row)">发货</el-button>
+            <el-tooltip v-if="row.qualityBlocked" :content="row.qualityBlockReason" placement="top" :show-after="100">
+              <el-tag size="small" effect="dark" :color="reworkColor[row.reworkStatus]" style="cursor: help">
+                ⛔ {{ reworkLabel[row.reworkStatus] || row.reworkStatusName }}
+              </el-tag>
+            </el-tooltip>
+            <el-tooltip v-else-if="row.reworkStatus === 'RELEASED'" content="关联返修批次已复检合格放行" placement="top" :show-after="100">
+              <el-tag size="small" type="success" effect="plain" style="cursor: help">✓ 已放行</el-tag>
+            </el-tooltip>
+            <span v-else style="font-size: 10px; color: var(--ink-dim)">无返修</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220">
+          <template #default="{ row }">
+            <el-button size="small" :disabled="row.shipStatus === 'SHIPPED' || row.qualityBlocked"
+                       @click="loadRack(row)">上架</el-button>
+            <el-button size="small" type="primary"
+                       :disabled="row.shipStatus === 'SHIPPED' || row.qualityBlocked"
+                       @click="ship(row)">发货</el-button>
+            <el-button v-if="row.qualityBlocked" link type="warning" size="small" @click="goRework(row.reworkBatchId)">
+              去处理
+            </el-button>
+            <div v-if="row.qualityBlocked" class="gate-reason">{{ row.qualityBlockReason }}</div>
           </template>
         </el-table-column>
       </el-table>
@@ -338,5 +368,6 @@ const shipLabel = { PENDING: '待备货', READY: '待发货', SHIPPED: '已发�
 .load-text { font-size: 10px; color: var(--ink-dim); }
 .rack-stat-inline { margin-left: auto; display: flex; gap: 12px; font-size: 11px; color: var(--ink-dim); font-weight: 400; }
 .pos-row { display: flex; align-items: center; gap: 6px; }
+.gate-reason { font-size: 10px; color: #ff8a80; margin-top: 3px; line-height: 1.4; max-width: 210px; }
 .grid-2-wide.reverse { display: flex; flex-direction: column; }
 </style>

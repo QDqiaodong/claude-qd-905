@@ -230,7 +230,73 @@ public final class Dict {
     private static final Map<String, String> SHIP_STATUS_NAME = Map.of(
             SHIP_PENDING, "待备货",
             SHIP_READY, "待发货",
-            SHIP_SHIPPED, "已发货");
+            SHIPPED, "已发货");
+
+    // ---------------- 返修批次受控状态 ----------------
+    /** 隔离中：任一工序判返修后首先进入隔离区 */
+    public static final String RW_QUARANTINED = "QUARANTINED";
+    /** 处理中：返修处置已开工 */
+    public static final String RW_PROCESSING = "PROCESSING";
+    /** 待复检：处置完成，等待复检结论 */
+    public static final String RW_INSPECTING = "INSPECTING";
+    /** 已放行：复检合格，允许继续上架与发运 */
+    public static final String RW_RELEASED = "RELEASED";
+    /** 已归并：经批次号 / 订单号桥接归入另一返修批次（保留行用于审计） */
+    public static final String RW_MERGED = "MERGED";
+
+    public static final List<String> REWORK_STATUSES = List.of(
+            RW_QUARANTINED, RW_PROCESSING, RW_INSPECTING, RW_RELEASED, RW_MERGED);
+
+    /** 未收口、仍需拦截的状态（已放行 / 已归并不在其中） */
+    public static final List<String> REWORK_OPEN_STATUSES =
+            List.of(RW_QUARANTINED, RW_PROCESSING, RW_INSPECTING);
+
+    private static final Map<String, String> REWORK_STATUS_NAME = Map.of(
+            RW_QUARANTINED, "隔离中",
+            RW_PROCESSING, "处理中",
+            RW_INSPECTING, "待复检",
+            RW_RELEASED, "已放行",
+            RW_MERGED, "已归并");
+
+    /** 返修时间线事件类型 */
+    public static final String EV_ISOLATE = "ISOLATE";
+    public static final String EV_MERGE = "MERGE";
+    public static final String EV_START = "START";
+    public static final String EV_DISPOSE = "DISPOSE";
+    public static final String EV_RELEASE = "RELEASE";
+    public static final String EV_REWORK_BACK = "REWORK_BACK";
+    public static final String EV_REOPEN = "REOPEN";
+    public static final String EV_CONFLICT = "CONFLICT";
+
+    private static final Map<String, String> REWORK_EVENT_NAME = Map.of(
+            EV_ISOLATE, "返修隔离",
+            EV_MERGE, "来源归并",
+            EV_START, "开工处置",
+            EV_DISPOSE, "处置登记",
+            EV_RELEASE, "复检放行",
+            EV_REWORK_BACK, "复检再判返修",
+            EV_REOPEN, "放行后重新隔离",
+            EV_CONFLICT, "并发结论冲突");
+
+    /** 归并取舍判定理由（写 rework_merge_log，供时间线解释来源构成） */
+    public static final String MR_NEW_BATCH = "NEW_BATCH";
+    public static final String MR_SAME_BATCH = "SAME_BATCH";
+    public static final String MR_ORDER_BRIDGE = "ORDER_BRIDGE";
+    public static final String MR_ORDER_MATCH = "ORDER_MATCH";
+    public static final String MR_ORDER_ONLY = "ORDER_ONLY";
+    public static final String MR_REFUSE_ORDER_AMBIGUOUS = "REFUSE_ORDER_AMBIGUOUS";
+    public static final String MR_REFUSE_BATCH_CONFLICT = "REFUSE_BATCH_CONFLICT";
+    public static final String MR_ISOLATED_NO_KEY = "ISOLATED_NO_KEY";
+
+    private static final Map<String, String> MERGE_REASON_NAME = Map.of(
+            MR_NEW_BATCH, "新实物批次建单",
+            MR_SAME_BATCH, "批次号一致归并",
+            MR_ORDER_BRIDGE, "订单号桥接归并",
+            MR_ORDER_MATCH, "仅订单号匹配归并",
+            MR_ORDER_ONLY, "仅有订单号，先按订单隔离",
+            MR_REFUSE_ORDER_AMBIGUOUS, "订单跨多个实物批次，拒绝归并",
+            MR_REFUSE_BATCH_CONFLICT, "批次号与订单号指向冲突，按批次号为准",
+            MR_ISOLATED_NO_KEY, "旧记录缺少批次/订单号，独立隔离");
 
     // ---------------- 取值方法 ----------------
 
@@ -337,6 +403,26 @@ public final class Dict {
 
     public static String shipStatusName(String status) {
         return status == null ? "" : SHIP_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static boolean isValidReworkStatus(String status) {
+        return status != null && REWORK_STATUS_NAME.containsKey(status);
+    }
+
+    public static String reworkStatusName(String status) {
+        return status == null ? "" : REWORK_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static boolean isOpenReworkStatus(String status) {
+        return status != null && REWORK_OPEN_STATUSES.contains(status);
+    }
+
+    public static String reworkEventName(String event) {
+        return event == null ? "" : REWORK_EVENT_NAME.getOrDefault(event, event);
+    }
+
+    public static String mergeReasonName(String reason) {
+        return reason == null ? "" : MERGE_REASON_NAME.getOrDefault(reason, reason);
     }
 
     public static String stageName(String stage) {

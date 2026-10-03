@@ -14,6 +14,11 @@ CREATE DATABASE IF NOT EXISTS glass_works
 USE glass_works;
 
 SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS rework_event;
+DROP TABLE IF EXISTS rework_merge_log;
+DROP TABLE IF EXISTS rework_source;
+DROP TABLE IF EXISTS rework_identity;
+DROP TABLE IF EXISTS rework_batch;
 DROP TABLE IF EXISTS finished_rack;
 DROP TABLE IF EXISTS inspection_record;
 DROP TABLE IF EXISTS deep_process_record;
@@ -181,12 +186,100 @@ CREATE TABLE inspection_record (
     KEY idx_inspect_stage (process_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------- 返修批次（检验/深加工/成品架共享的同一份批次质量状态） ----------------
+-- 受控流转：QUARANTINED 隔离中 → PROCESSING 处理中 → INSPECTING 待复检
+--           → RELEASED 已放行；复检再判返修回 QUARANTINED；放行后再判返修 REOPEN。
+-- MERGED 为仅订单号临时单经批次号桥接归并后的留存状态（审计）。
+-- version 为乐观锁；复检提交服务端再加行级悲观写锁串行化并发结论。
+CREATE TABLE rework_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rework_no VARCHAR(32) NOT NULL UNIQUE,
+    key_batch_no VARCHAR(32),
+    order_nos VARCHAR(256),
+    isolation_location VARCHAR(32),
+    status VARCHAR(16) NOT NULL,
+    current_round INT DEFAULT 1,
+    total_sheets INT DEFAULT 0,
+    disposition_method VARCHAR(128),
+    disposition_progress VARCHAR(128),
+    disposed_by VARCHAR(32),
+    isolated_at DATETIME,
+    released_at DATETIME,
+    created_at DATETIME,
+    updated_at DATETIME,
+    version BIGINT DEFAULT 0,
+    KEY idx_rw_status (status),
+    KEY idx_rw_batch (key_batch_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 返修归并身份：BATCH 为实物强标识（唯一），ORDER 为可桥接弱标识（可多条）
+CREATE TABLE rework_identity (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    identity_type VARCHAR(8) NOT NULL,
+    identity_value VARCHAR(32) NOT NULL,
+    created_at DATETIME,
+    UNIQUE KEY uk_rw_identity (identity_type, identity_value, batch_id),
+    KEY idx_rw_identity_lookup (identity_type, identity_value)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 返修来源：来源工序、涉及片数、缺陷、归并理由，一条检验单只属于一张返修批次
+CREATE TABLE rework_source (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    inspection_id BIGINT,
+    inspect_no VARCHAR(32),
+    source_process VARCHAR(16),
+    source_batch_no VARCHAR(32),
+    source_order_no VARCHAR(32),
+    defect_type VARCHAR(16),
+    sheet_count INT,
+    inspector VARCHAR(32),
+    round_no INT,
+    merge_reason VARCHAR(32),
+    linked_at DATETIME,
+    UNIQUE KEY uk_rw_source_inspection (inspection_id),
+    KEY idx_rw_source_batch (batch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 返修时间线：隔离/归并/开工/处置/放行/回隔离/并发冲突 全程可审计
+CREATE TABLE rework_event (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_id BIGINT NOT NULL,
+    event_type VARCHAR(16) NOT NULL,
+    round_no INT,
+    from_status VARCHAR(16),
+    to_status VARCHAR(16),
+    actor VARCHAR(32),
+    detail VARCHAR(512),
+    conflict_inspector VARCHAR(32),
+    conflict_verdict VARCHAR(8),
+    winning_verdict VARCHAR(8),
+    event_at DATETIME NOT NULL,
+    KEY idx_rw_event_batch (batch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 归并日志：每笔判返修记录如何并/为何不并，解释历史残缺数据的取舍
+CREATE TABLE rework_merge_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    inspect_no VARCHAR(32),
+    batch_no VARCHAR(32),
+    order_no VARCHAR(32),
+    batch_id BIGINT,
+    merged_from_batch_id BIGINT,
+    reason VARCHAR(32),
+    detail VARCHAR(512),
+    created_at DATETIME,
+    KEY idx_rw_merge_batch (batch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ---------------- 成品架 ----------------
 -- area_sqm 是派生列：长 × 宽 × 片数 / 1,000,000，读回时与规格片数反校验。
 CREATE TABLE finished_rack (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     rack_no VARCHAR(16) NOT NULL UNIQUE,
     order_no VARCHAR(32) NOT NULL,
+    batch_no VARCHAR(32),
     glass_type VARCHAR(32),
     thickness_mm INT,
     length_mm INT,
@@ -319,16 +412,27 @@ INSERT INTO inspection_record (inspect_no, process_type, batch_no, order_no, def
 ('IR-20240510-012', 'INSULATING', 'YP-2404-03', 'DP-20240510-007',  'BUBBLE',   2.60, 45.00, 40.00, 'SCRAP',  '吴静', 3,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
 ('IR-20240506-013', 'INSULATING', 'YP-2401-01', 'DP-20240506-004',  'SCRATCH',  6.40, 70.00, 18.00, 'REWORK', '吴静', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
 ('IR-20240509-014', 'LAMINATING', 'YP-2401-01', 'DP-20240509-008',  'BUBBLE',   1.50, 35.00, 62.00, 'PASS',   '何斌', 20, UTC_TIMESTAMP() + INTERVAL 8 HOUR),
-('IR-20240511-015', 'LAMINATING', 'YP-2404-01', 'DP-20240511-010',  'STONE',    0.90, 88.00, 30.00, 'PASS',   '何斌', 10, UTC_TIMESTAMP() + INTERVAL 8 HOUR);
+('IR-20240511-015', 'LAMINATING', 'YP-2404-01', 'DP-20240511-010',  'STONE',    0.90, 88.00, 30.00, 'PASS',   '何斌', 10, UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+-- 历史返修记录的各种残缺形态，用于检验“不误并不同实物、不让旧记录失联”的归并取舍
+('IR-20240506-016', 'CUTTING',    'YP-2401-01', NULL,                'CHIP',     2.80, 30.00, 40.00, 'REWORK', '周梅', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240507-017', 'GRINDING',   'YP-2401-03', NULL,                'CHIP',     1.60, 20.00, 60.00, 'REWORK', '吴静', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240507-018', 'INSULATING', NULL,         'DP-20240506-004',  'SCRATCH',  3.20, 40.00, 50.00, 'REWORK', '吴静', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240506-019', 'CUTTING',    'YP-2402-02', NULL,                'SCRATCH',  5.00, 55.00, 35.00, 'REWORK', '周梅', 2,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240507-020', 'CUTTING',    'YP-2403-03', NULL,                'STRESS',   4.40, 60.00, 25.00, 'REWORK', '何斌', 2,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240510-021', 'INSULATING', 'YP-2404-99', 'DD-2405-029',      'BUBBLE',   2.10, 48.00, 42.00, 'REWORK', '吴静', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240511-022', 'INSULATING', NULL,         'DD-2405-029',      'BUBBLE',   1.80, 36.00, 58.00, 'REWORK', '吴静', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240510-023', 'INSULATING', 'YP-2405-88', 'DD-2405-029',      'STONE',    1.10, 70.00, 20.00, 'REWORK', '周梅', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240511-024', 'COATING',    NULL,         NULL,                'SCRATCH',  2.40, 50.00, 50.00, 'REWORK', '周梅', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('IR-20240511-025', 'INSULATING', NULL,         'DD-2405-029',      'BUBBLE',   1.50, 42.00, 33.00, 'REWORK', '吴静', 1,  UTC_TIMESTAMP() + INTERVAL 8 HOUR);
 
-INSERT INTO finished_rack (rack_no, order_no, glass_type, thickness_mm, length_mm, width_mm, sheet_count, max_load_kg, current_load_kg, area_sqm, ship_status, shipped_at) VALUES
-('R-01', 'DD-2405-018', 'FLOAT_CLEAR',  6,  1200, 900,  24, 3000.00, 388.80,  25.92, 'READY',   NULL),
-('R-02', 'DD-2405-019', 'ULTRA_CLEAR',  8,  1500, 1000, 16, 3000.00, 480.00,  24.00, 'READY',   NULL),
-('R-03', 'DD-2405-021', 'TINTED',       6,  1000, 800,  30, 3000.00, 360.00,  24.00, 'SHIPPED', UTC_TIMESTAMP() + INTERVAL 8 HOUR),
-('R-04', 'DD-2405-022', 'LOWE_BASE',    5,  1100, 900,  20, 2500.00, 247.50,  19.80, 'READY',   NULL),
-('R-05', 'DD-2405-024', 'FLOAT_CLEAR',  12, 1600, 1200, 12, 4000.00,   0.00,  23.04, 'PENDING', NULL),
-('R-06', 'DD-2405-025', 'LOWE_BASE',    6,  800,  600,  40, 2500.00, 288.00,  19.20, 'READY',   NULL),
-('R-07', 'DD-2405-027', 'FLOAT_CLEAR',  10, 1200, 600,  18, 3000.00, 324.00,  12.96, 'SHIPPED', UTC_TIMESTAMP() + INTERVAL 8 HOUR),
-('R-08', 'DD-2405-028', 'ULTRA_CLEAR',  4,  1830, 1220, 36, 3000.00, 803.70,  80.37, 'READY',   NULL),
-('R-09', 'DD-2405-030', 'TINTED',       10, 900,  600,  22, 3000.00,   0.00,  11.88, 'PENDING', NULL),
-('R-10', 'DD-2405-031', 'FLOAT_CLEAR',  15, 700,  500,  10, 3000.00, 131.25,   3.50, 'READY',   NULL);
+INSERT INTO finished_rack (rack_no, order_no, batch_no, glass_type, thickness_mm, length_mm, width_mm, sheet_count, max_load_kg, current_load_kg, area_sqm, ship_status, shipped_at) VALUES
+('R-01', 'DD-2405-018', 'YP-2401-01', 'FLOAT_CLEAR',  6,  1200, 900,  24, 3000.00, 388.80,  25.92, 'READY',   NULL),
+('R-02', 'DD-2405-019', 'YP-2401-02', 'ULTRA_CLEAR',  8,  1500, 1000, 16, 3000.00, 480.00,  24.00, 'READY',   NULL),
+('R-03', 'DD-2405-021', 'YP-2401-03', 'TINTED',       6,  1000, 800,  30, 3000.00, 360.00,  24.00, 'SHIPPED', UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('R-04', 'DD-2405-022', 'YP-2402-01', 'LOWE_BASE',    5,  1100, 900,  20, 2500.00, 247.50,  19.80, 'READY',   NULL),
+('R-05', 'DD-2405-024', 'YP-2402-03', 'FLOAT_CLEAR',  12, 1600, 1200, 12, 4000.00,   0.00,  23.04, 'PENDING', NULL),
+('R-06', 'DD-2405-025', 'YP-2403-03', 'LOWE_BASE',    6,  800,  600,  40, 2500.00, 288.00,  19.20, 'READY',   NULL),
+('R-07', 'DD-2405-027', 'YP-2401-02', 'FLOAT_CLEAR',  10, 1200, 600,  18, 3000.00, 324.00,  12.96, 'SHIPPED', UTC_TIMESTAMP() + INTERVAL 8 HOUR),
+('R-08', 'DD-2405-028', 'YP-2405-03', 'ULTRA_CLEAR',  4,  1830, 1220, 36, 3000.00, 803.70,  80.37, 'READY',   NULL),
+('R-09', 'DD-2405-030', 'YP-2402-02', 'TINTED',       10, 900,  600,  22, 3000.00,   0.00,  11.88, 'PENDING', NULL),
+('R-10', 'DD-2405-031', 'YP-2404-99', 'FLOAT_CLEAR',  15, 700,  500,  10, 3000.00, 131.25,   3.50, 'READY',   NULL);

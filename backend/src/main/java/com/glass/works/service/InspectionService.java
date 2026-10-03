@@ -16,7 +16,11 @@ import com.glass.works.repository.InspectionRecordRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -27,11 +31,14 @@ public class InspectionService {
 
     private final InspectionRecordRepository inspectionRepository;
     private final FinishedRackRepository rackRepository;
+    private final ReworkService reworkService;
 
     public InspectionService(InspectionRecordRepository inspectionRepository,
-                             FinishedRackRepository rackRepository) {
+                             FinishedRackRepository rackRepository,
+                             @Lazy ReworkService reworkService) {
         this.inspectionRepository = inspectionRepository;
         this.rackRepository = rackRepository;
+        this.reworkService = reworkService;
     }
 
     // ---------------- 检验 ----------------
@@ -77,7 +84,12 @@ public class InspectionService {
         record.setInspector(request.getInspector());
         record.setSheetCount(request.getSheetCount() == null ? 1 : request.getSheetCount());
         record.setInspectedAt(LocalDateTime.now());
-        return inspectionRepository.save(record);
+        record = inspectionRepository.save(record);
+        // 任一工序判返修：立即形成可追溯的返修隔离记录（同事务，失败一起回滚）
+        if (Dict.VERDICT_REWORK.equals(record.getVerdict())) {
+            reworkService.ingest(record);
+        }
+        return record;
     }
 
     /** 缺陷分布图：玻璃板平面 + 缺陷打点 + 类型占比 */
@@ -88,6 +100,14 @@ public class InspectionService {
         long pass = 0;
         long rework = 0;
         long scrap = 0;
+        // 检验页共享批次质量状态：打点上直接带出该实物批次当前是否仍在返修隔离
+        Set<String> batchNos = new HashSet<>();
+        for (InspectionRecord r : records) {
+            if (StringUtils.hasText(r.getBatchNo())) {
+                batchNos.add(r.getBatchNo().trim());
+            }
+        }
+        Map<String, String> qualityStatus = reworkService.openStatusByBatchNo(batchNos);
         for (InspectionRecord record : records) {
             DefectPointVO point = new DefectPointVO();
             point.setId(record.getId());
@@ -105,6 +125,11 @@ public class InspectionService {
             point.setProcessTypeName(Dict.workStageName(record.getProcessType()));
             point.setInspector(record.getInspector());
             point.setSheetCount(record.getSheetCount());
+            if (StringUtils.hasText(record.getBatchNo())) {
+                String rwStatus = qualityStatus.get(record.getBatchNo().trim());
+                point.setReworkStatus(rwStatus);
+                point.setReworkStatusName(Dict.reworkStatusName(rwStatus));
+            }
             vo.getDefects().add(point);
             if (Dict.VERDICT_PASS.equals(record.getVerdict())) {
                 pass++;
@@ -124,8 +149,19 @@ public class InspectionService {
 
     // ---------------- 成品架 ----------------
 
+    /** 成品架列表：逐架填充共享质量门状态与拦截原因（已发运架位只读不倒改） */
     public List<FinishedRack> racks() {
-        return rackRepository.findAll();
+        List<FinishedRack> racks = rackRepository.findAll();
+        for (FinishedRack rack : racks) {
+            boolean shipped = Dict.SHIP_SHIPPED.equals(rack.getShipStatus());
+            reworkService.applyGateFields(rack, rack.getOrderNo(), rack.getBatchNo(), shipped,
+                    (r, batchId, reworkNo, status) -> {
+                        r.setReworkBatchId(batchId);
+                        r.setReworkNo(reworkNo);
+                        r.setReworkStatus(status);
+                    });
+        }
+        return racks;
     }
 
     public List<RackStatDTO> rackStat() {
@@ -153,6 +189,7 @@ public class InspectionService {
         FinishedRack rack = new FinishedRack();
         rack.setRackNo(request.getRackNo());
         rack.setOrderNo(request.getOrderNo());
+        rack.setBatchNo(StringUtils.hasText(request.getBatchNo()) ? request.getBatchNo().trim() : null);
         rack.setGlassType(request.getGlassType());
         rack.setThicknessMm(request.getThicknessMm());
         rack.setLengthMm(request.getLengthMm());
@@ -179,6 +216,8 @@ public class InspectionService {
         if (Dict.SHIP_SHIPPED.equals(rack.getShipStatus())) {
             throw new BizException("成品架 " + rack.getRackNo() + " 已发货，不能再上架");
         }
+        // 质量门：隔离 / 处理中 / 待复检批次禁止上架（不是仅前端置灰，服务端强制）
+        reworkService.assertShippable(rack.getRackNo(), rack.getOrderNo(), rack.getBatchNo());
         BigDecimal weight = request == null || request.getWeightKg() == null
                 ? rack.getEstimatedWeightKg() : request.getWeightKg();
         if (weight.doubleValue() <= 0) {
@@ -208,6 +247,8 @@ public class InspectionService {
         if (nvl(rack.getCurrentLoadKg()).doubleValue() <= 0) {
             throw new BizException("成品架 " + rack.getRackNo() + " 尚未上架成品，不能发货");
         }
+        // 质量门：必须复检合格放行的批次才能发运；已发运数据在上一步短路，不倒改
+        reworkService.assertShippable(rack.getRackNo(), rack.getOrderNo(), rack.getBatchNo());
         rack.setShipStatus(Dict.SHIP_SHIPPED);
         rack.setShippedAt(LocalDateTime.now());
         return rackRepository.save(rack);

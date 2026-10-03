@@ -17,6 +17,8 @@ public final class Requests {
     public static class RackRequest {
         private String rackNo;
         private String orderNo;
+        /** 关联实物批次号（质量门共享状态的关联键，老数据可为空） */
+        private String batchNo;
         private String glassType;
         private Integer thicknessMm;
         private Integer lengthMm;

@@ -1,11 +1,15 @@
 package com.glass.works.common;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.glass.works.service.ReworkService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -13,6 +17,31 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * 并发复检结论冲突：409。唯一有效最终状态已由先到者确定，
+     * 落败结论写入 CONFLICT 审计事件；响应体带出胜方结论供前端明确提示。
+     */
+    @ExceptionHandler(ReworkService.ConcurrentVerdictConflictException.class)
+    public ResponseEntity<ApiResponse<Map<String, Object>>> handleConflict(
+            ReworkService.ConcurrentVerdictConflictException e) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("batchId", e.getBatchId());
+        data.put("winningVerdict", e.getWinningVerdict());
+        data.put("conflictInspector", e.getConflictInspector());
+        data.put("conflictVerdict", e.getConflictVerdict());
+        ApiResponse<Map<String, Object>> body = new ApiResponse<>(false, e.getMessage(), data);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    /**
+     * 乐观锁版本冲突（并发状态推进）：409，要求刷新后重试
+     */
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(ObjectOptimisticLockingFailureException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail("返修批次状态已被他人更新，请刷新时间线后重试（结论未被覆盖）"));
+    }
 
     /**
      * 业务校验失败：400 + 中文业务提示

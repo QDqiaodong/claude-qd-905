@@ -41,6 +41,13 @@ public class FinishedRack {
     @Column(name = "order_no", nullable = false, length = 32)
     private String orderNo;
 
+    /**
+     * 关联实物批次号：成品架与返修批次共享同一份质量状态的关联键。
+     * 老数据可能为空，此时回退按订单号匹配返修身份。
+     */
+    @Column(name = "batch_no", length = 32)
+    private String batchNo;
+
     @Column(name = "glass_type", length = 32)
     private String glassType;
 
@@ -136,4 +143,62 @@ public class FinishedRack {
                 .multiply(BigDecimal.valueOf(2.5))
                 .setScale(2, RoundingMode.HALF_UP);
     }
+
+    // ---------------- 质量门只读视图（不落库，由返修状态统一填充） ----------------
+
+    /** 命中的返修批次 id */
+    @Transient
+    public Long getReworkBatchId() {
+        return gateReworkBatchId;
+    }
+
+    public void setReworkBatchId(Long reworkBatchId) {
+        this.gateReworkBatchId = reworkBatchId;
+    }
+
+    /** 命中的返修单号 */
+    @Transient
+    public String getReworkNo() {
+        return gateReworkNo;
+    }
+
+    public void setReworkNo(String reworkNo) {
+        this.gateReworkNo = reworkNo;
+    }
+
+    /** 命中返修批次的当前状态：QUARANTINED / PROCESSING / INSPECTING / RELEASED */
+    @Transient
+    public String getReworkStatus() {
+        return gateReworkStatus;
+    }
+
+    public void setReworkStatus(String reworkStatus) {
+        this.gateReworkStatus = reworkStatus;
+    }
+
+    @Transient
+    public String getReworkStatusName() {
+        return Dict.reworkStatusName(gateReworkStatus);
+    }
+
+    /** 是否被质量门拦截（隔离 / 处理中 / 待复检 不允许上架、发运） */
+    @Transient
+    public boolean isQualityBlocked() {
+        return Dict.isOpenReworkStatus(gateReworkStatus);
+    }
+
+    /** 拦截原因，供前端在成品架行内明确展示 */
+    @Transient
+    public String getQualityBlockReason() {
+        if (!isQualityBlocked()) {
+            return null;
+        }
+        return "关联返修批次 " + (gateReworkNo == null ? "" : gateReworkNo + " ")
+                + "当前为「" + Dict.reworkStatusName(gateReworkStatus)
+                + "」，未复检放行，禁止上架与发运";
+    }
+
+    private transient Long gateReworkBatchId;
+    private transient String gateReworkNo;
+    private transient String gateReworkStatus;
 }

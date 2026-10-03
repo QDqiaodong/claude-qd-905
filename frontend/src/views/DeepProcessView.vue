@@ -17,6 +17,16 @@ const records = ref([])
 const stat = ref([])
 const selectedId = ref(null)
 const dialog = ref(false)
+const openRework = ref([])
+
+const REWORK_LABEL = { QUARANTINED: '返修隔离中', PROCESSING: '返修处理中', INSPECTING: '待复检', RELEASED: '复检已放行' }
+const REWORK_COLOR = { QUARANTINED: '#e4573d', PROCESSING: '#ffb74d', INSPECTING: '#4fc3f7', RELEASED: '#4dd6a8' }
+
+/** 深加工与检验/成品架共享同一份批次质量状态：按批次号查当前返修状态 */
+function reworkOf(batchNo) {
+  if (!batchNo) return null
+  return openRework.value.find((b) => b.keyBatchNo === batchNo) || null
+}
 
 const form = ref({
   recordNo: '', processType: 'COATING', batchNo: '', glassType: 'LOWE_BASE', thicknessMm: 6, pieceCount: 40,
@@ -27,6 +37,7 @@ const form = ref({
 })
 
 const current = computed(() => records.value.find((r) => r.id === selectedId.value) || records.value[0] || null)
+const currentRework = computed(() => (current.value ? reworkOf(current.value.batchNo) : null))
 
 const bands = computed(() => {
   const r = current.value
@@ -69,6 +80,7 @@ async function load() {
   } catch (e) {
     ElMessage.error(e.message)
   }
+  try { openRework.value = await api.rework.open() } catch (e) { /* 质量状态加载失败不阻断主视图 */ }
 }
 
 function openDialog() {
@@ -121,6 +133,12 @@ watch(processType, load)
       <!-- 左：玻璃剖面 -->
       <div class="glass glass-pad">
         <div class="section-title">玻璃结构剖面 · {{ current ? current.recordNo : '-' }}</div>
+        <div v-if="currentRework" class="rw-banner" :style="{ borderColor: REWORK_COLOR[currentRework.status] }">
+          <span :style="{ color: REWORK_COLOR[currentRework.status] }">●</span>
+          批次 {{ currentRework.keyBatchNo }} 共享质量状态：
+          <b :style="{ color: REWORK_COLOR[currentRework.status] }">{{ REWORK_LABEL[currentRework.status] }}</b>
+          <span class="rw-sub">（返修单 {{ currentRework.reworkNo }} · 第 {{ currentRework.currentRound }} 轮 · {{ currentRework.totalSheets }} 片），成品架发运将被拦截</span>
+        </div>
         <div class="section-wrap">
           <div
             v-for="(b, i) in bands" :key="i"
@@ -175,6 +193,15 @@ watch(processType, load)
             </template>
           </el-table-column>
           <el-table-column prop="operator" label="操作员" width="80" />
+          <el-table-column label="质量状态" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="reworkOf(row.batchNo)" size="small" effect="dark"
+                      :color="REWORK_COLOR[reworkOf(row.batchNo).status]">
+                {{ REWORK_LABEL[reworkOf(row.batchNo).status] }}
+              </el-tag>
+              <span v-else style="font-size: 10px; color: var(--ink-dim)">无返修</span>
+            </template>
+          </el-table-column>
         </el-table>
         <div class="hint" v-if="current">{{ current.remark }}</div>
       </div>
@@ -254,4 +281,9 @@ watch(processType, load)
 .stat-strip .k { font-size: 10px; }
 .stat-strip .v { font-size: 15px; }
 .hint { font-size: 11px; color: var(--ink-dim); margin-top: 9px; line-height: 1.6; }
+.rw-banner {
+  font-size: 12px; color: var(--ink-soft); margin-bottom: 10px; padding: 7px 10px;
+  border-left: 3px solid; border-radius: 8px; background: rgba(255,255,255,0.05);
+}
+.rw-banner .rw-sub { color: var(--ink-dim); font-size: 11px; margin-left: 4px; }
 </style>

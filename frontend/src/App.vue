@@ -8,6 +8,7 @@ import CuttingView from './views/CuttingView.vue'
 import TemperingView from './views/TemperingView.vue'
 import DeepProcessView from './views/DeepProcessView.vue'
 import InspectionView from './views/InspectionView.vue'
+import ReworkView from './views/ReworkView.vue'
 
 const modules = [
   {
@@ -55,6 +56,14 @@ const modules = [
       { label: '缺陷分布图', path: '/inspection', query: {} },
       { label: '成品架', path: '/inspection', query: { view: 'rack' } }
     ]
+  },
+  {
+    key: 'rework',
+    name: '返修质量闭环',
+    desc: '隔离 · 处置 · 复检放行',
+    children: [
+      { label: '返修批次工作区', path: '/rework', query: {} }
+    ]
   }
 ]
 
@@ -69,7 +78,8 @@ const viewMap = {
   '/cutting': CuttingView,
   '/tempering': TemperingView,
   '/deep': DeepProcessView,
-  '/inspection': InspectionView
+  '/inspection': InspectionView,
+  '/rework': ReworkView
 }
 
 const currentView = computed(
@@ -127,6 +137,9 @@ onMounted(() => {
         <div class="top-stat"><b>{{ overview.temperingCount }}</b><span>钢化炉次</span></div>
         <div class="top-stat"><b>{{ overview.deepProcessCount }}</b><span>深加工批次</span></div>
         <div class="top-stat"><b>{{ overview.passCount }}</b><span>检验合格</span></div>
+        <div class="top-stat" :class="{ alert: overview.reworkOpenCount > 0 }">
+          <b>{{ overview.reworkOpenCount || 0 }}</b><span>返修待办</span>
+        </div>
         <div class="top-stat"><b>{{ overview.rackCount }}</b><span>成品架</span></div>
       </div>
     </header>

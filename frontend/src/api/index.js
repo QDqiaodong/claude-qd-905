@@ -6,8 +6,14 @@ const http = axios.create({ baseURL: '/api', timeout: 20000 })
 http.interceptors.response.use(
   (response) => response,
   (error) => {
-    const message = error?.response?.data?.message || error?.message || '请求失败'
-    return Promise.reject(new Error(message))
+    const body = error?.response?.data
+    const message = body?.message || error?.message || '请求失败'
+    const err = new Error(message)
+    // 并发复检冲突 409：把胜方结论与落败提交带给工作区，便于明确提示与审计跳转
+    if (error?.response?.status === 409 && body?.data) {
+      err.conflict = body.data
+    }
+    return Promise.reject(err)
   }
 )
 
@@ -70,12 +76,21 @@ const inspection = {
   list: (processType) => call(http.get('/inspection/list', { params: { processType } })),
   create: (data) => call(http.post('/inspection', data)),
   defectMap: (processType) => call(http.get('/inspection/defect-map', { params: { processType } })),
-  defectStat: () => call(http.get('/inspection/defect-stat')),
+  defectStat: (processType) => call(http.get('/inspection/defect-stat')),
   racks: () => call(http.get('/inspection/racks')),
   createRack: (data) => call(http.post('/inspection/racks', data)),
   loadRack: (id, data) => call(http.post(`/inspection/racks/${id}/load`, data || {})),
   ship: (id) => call(http.post(`/inspection/racks/${id}/ship`)),
   rackStat: () => call(http.get('/inspection/rack-stat'))
+}
+
+const rework = {
+  board: (status) => call(http.get('/rework/batches', { params: { status } })),
+  timeline: (id) => call(http.get(`/rework/batches/${id}/timeline`)),
+  start: (id, data) => call(http.post(`/rework/batches/${id}/start`, data)),
+  dispose: (id, data) => call(http.post(`/rework/batches/${id}/dispose`, data)),
+  reinspect: (id, data) => call(http.post(`/rework/batches/${id}/reinspect`, data)),
+  open: () => call(http.get('/rework/open'))
 }
 
 const stats = {
@@ -90,4 +105,4 @@ const stats = {
   rack: () => call(http.get('/stats/rack'))
 }
 
-export default { http, stock, cutting, process, deep, inspection, stats }
+export default { http, stock, cutting, process, deep, inspection, rework, stats }
